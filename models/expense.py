@@ -13,6 +13,7 @@ class EntryCreate(BaseModel):
     entryType: Literal["expense", "income"]
     category: str
     amount: float
+    date: Optional[str] = None  # ISO string from client; falls back to server time
     currency: str = Field(default="PKR", min_length=1)
     paymentMethod: str = Field(default="cash")
     notes: Optional[str] = None
