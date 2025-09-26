@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 
 from models.expense import EntryCreate, EntryResponse
 
-# Load env variables from .env if present
+
 load_dotenv()
 
 
@@ -75,6 +75,7 @@ def generate_short_id(length: int = 7) -> str:
 app = FastAPI(title="FinTech Backend")
 
 
+# ----------------- CREATE ENTRY (POST) -----------------
 @app.post("/entries", response_model=EntryResponse, tags=["entries"])
 async def create_entry(payload: EntryCreate):
     cfg = get_couch_config()
@@ -104,10 +105,10 @@ async def create_entry(payload: EntryCreate):
         if res.status_code not in (200, 201, 202):
             raise HTTPException(status_code=500, detail=f"CouchDB error: {res.text}")
 
-    # Return the created document
     return doc
 
 
+# ----------------- LIST ENTRIES (GET) -----------------
 @app.get("/entries")
 async def list_entries(limit: int | None = None, skip: int | None = None):
     try:
@@ -140,6 +141,38 @@ async def list_entries(limit: int | None = None, skip: int | None = None):
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
+# ----------------- DELETE ENTRY (DELETE) -----------------
+@app.delete("/entries/{entry_id}")
+async def delete_entry(entry_id: str):
+    try:
+        cfg = get_couch_config()
+        async with httpx.AsyncClient(timeout=10) as client:
+            # First fetch the doc to get its _rev
+            url = f"{cfg['base_url']}/{cfg['db']}/{quote(entry_id, safe='')}"
+            res = await client.get(url)
+            if res.status_code == 404:
+                raise HTTPException(status_code=404, detail="Entry not found")
+            if res.status_code != 200:
+                raise HTTPException(
+                    status_code=500, detail=f"CouchDB fetch error: {res.text}"
+                )
+            doc = res.json()
+            rev = doc.get("_rev")
+            if not rev:
+                raise HTTPException(status_code=500, detail="Revision (_rev) missing")
+
+            # Delete request with rev
+            del_url = f"{url}?rev={rev}"
+            del_res = await client.delete(del_url)
+            if del_res.status_code not in (200, 202):
+                raise HTTPException(
+                    status_code=500, detail=f"CouchDB delete error: {del_res.text}"
+                )
+            return {"status": "deleted", "id": entry_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
 def main():
     import uvicorn
 
@@ -151,3 +184,7 @@ if __name__ == "__main__":
 
 # Vercel handler
 handler = app
+
+
+
+

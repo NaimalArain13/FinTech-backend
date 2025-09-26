@@ -6,7 +6,8 @@ from urllib.parse import quote
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from models.expense import EntryCreate, EntryResponse
 
@@ -72,9 +73,20 @@ def generate_short_id(length: int = 7) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+# ✅ FastAPI app
 app = FastAPI(title="FinTech Backend")
 
+# ✅ Enable CORS (fix frontend fetch issue)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # dev ke liye sab allow, prod me restrict karna
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+
+# ✅ POST create new entry
 @app.post("/entries", response_model=EntryResponse, tags=["entries"])
 async def create_entry(payload: EntryCreate):
     cfg = get_couch_config()
@@ -98,17 +110,19 @@ async def create_entry(payload: EntryCreate):
         "meta": payload.meta.model_dump() if payload.meta else None,
     }
 
+    print("📥 New entry received:", doc)
+
     async with httpx.AsyncClient(timeout=10) as client:
         url = f"{cfg['base_url']}/{cfg['db']}"
         res = await client.post(url, json=doc)
         if res.status_code not in (200, 201, 202):
             raise HTTPException(status_code=500, detail=f"CouchDB error: {res.text}")
 
-    # Return the created document
     return doc
 
 
-@app.get("/entries")
+# ✅ GET entries
+@app.get("/entries", tags=["entries"])
 async def list_entries(limit: int | None = None, skip: int | None = None):
     try:
         cfg = get_couch_config()
@@ -135,19 +149,36 @@ async def list_entries(limit: int | None = None, skip: int | None = None):
                 doc = row.get("doc")
                 if isinstance(doc, dict) and doc.get("type") == "entry":
                     docs.append(doc)
+
+            print("📤 Entries fetched from DB:", docs)
             return docs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
+# ✅ DELETE entry
+@app.delete("/entries/{entry_id}", tags=["entries"])
+async def delete_entry(entry_id: str, rev: str = Query(..., description="Document revision ID")):
+    cfg = get_couch_config()
+    async with httpx.AsyncClient(timeout=10) as client:
+        url = f"{cfg['base_url']}/{cfg['db']}/{entry_id}?rev={rev}"
+        res = await client.delete(url)
+
+        if res.status_code not in (200, 202):
+            raise HTTPException(status_code=500, detail=f"CouchDB error: {res.text}")
+
+    print(f"🗑️ Entry deleted: {entry_id} (rev: {rev})")
+    return {"message": "Entry deleted successfully", "id": entry_id, "rev": rev}
+
+
 def main():
     import uvicorn
-
-    uvicorn.run(app, host="localhost", port=int(os.getenv("PORT", "8000")))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
 
 
 if __name__ == "__main__":
     main()
 
-# Vercel handler
+
+# ✅ Vercel handler
 handler = app

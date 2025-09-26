@@ -36,3 +36,12 @@ class EntryResponse(BaseModel):
     deviceId: Optional[str]
     syncStatus: Literal["local", "synced", "conflict"]
     meta: Optional[EntryMeta]
+
+
+
+
+
+
+
+
+
